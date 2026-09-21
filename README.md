@@ -1,5 +1,9 @@
 # Shoulder Prosthesis Control Prototype
 
+**Live demo:** https://tianlingfeng9996.github.io/shoulder-prosthesis-mjswan/
+
+The first visit downloads the browser MuJoCo runtime and can take about a minute.
+
 An interactive four-degree-of-freedom shoulder-prosthesis control prototype powered by
 MuJoCo and the Mjswan browser engine.
 
