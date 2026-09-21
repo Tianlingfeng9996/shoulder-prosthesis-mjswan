@@ -1,0 +1,117 @@
+<mujoco model="shoulder_prosthesis_control_prototype">
+  <!--
+    Equivalent kinematic prototype, not a CAD-derived mechanism model.
+    Dimensions, axes, limits and inertial properties below are temporary.
+  -->
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+
+  <visual>
+    <headlight ambient="0.35 0.35 0.35" diffuse="0.75 0.75 0.75" specular="0.2 0.2 0.2"/>
+    <rgba haze="0.15 0.18 0.22 1"/>
+    <global azimuth="135" elevation="-20"/>
+  </visual>
+
+  <default>
+    <joint damping="2" armature="0.02"/>
+    <geom contype="0" conaffinity="0" density="800" friction="0.8 0.02 0.001"
+          rgba="0.28 0.48 0.72 1"/>
+    <position kp="120" kv="18"/>
+  </default>
+
+  <asset>
+    <material name="base_mat" rgba="0.18 0.22 0.28 1"/>
+    <material name="upper_mat" rgba="0.22 0.52 0.78 1"/>
+    <material name="forearm_mat" rgba="0.18 0.68 0.58 1"/>
+    <material name="hand_mat" rgba="0.90 0.58 0.20 1"/>
+    <material name="target_mat" rgba="0.95 0.18 0.18 0.70"/>
+  </asset>
+
+  <worldbody>
+    <light pos="1 -1 2.8" dir="-0.4 0.3 -1"/>
+    <geom name="floor" type="plane" size="2 2 0.05" pos="0 0 0" rgba="0.12 0.14 0.18 1"/>
+
+    <!-- Fixed shoulder base. The arm's neutral pose points downward. -->
+    <body name="fixed_base" pos="0 0 1.15">
+      <geom name="base_plate" type="box" size="0.10 0.14 0.10" pos="0.05 0 0.08" material="base_mat"/>
+      <geom name="base_post" type="cylinder" size="0.055 0.13" pos="0 0 -0.08" material="base_mat"/>
+
+      <!-- Positive shoulder flexion moves the arm toward model -X (defined as forward). -->
+      <body name="shoulder_flexion_frame">
+        <joint name="shoulder_flexion" type="hinge" axis="0 1 0" range="-30 100"/>
+        <geom name="shoulder_pitch_hub" type="cylinder" size="0.07 0.075" quat="0.707107 0 0.707107 0"
+              material="upper_mat"/>
+
+        <!-- Positive shoulder abduction moves the arm toward model +Y. -->
+        <body name="shoulder_abduction_frame">
+          <joint name="shoulder_abduction" type="hinge" axis="1 0 0" range="-10 90"/>
+          <geom name="shoulder_roll_hub" type="sphere" size="0.075" material="upper_mat"/>
+          <geom name="upper_arm" type="capsule" fromto="0 0 -0.04 0 0 -0.34" size="0.047"
+                material="upper_mat"/>
+
+          <!-- Temporary interpretation: forearm forward/back = elbow/forearm pitch. -->
+          <body name="forearm_frame" pos="0 0 -0.36">
+            <joint name="forearm_pitch" type="hinge" axis="0 1 0" range="-20 110"/>
+            <geom name="elbow_hub" type="cylinder" size="0.055 0.06" quat="0.707107 0 0.707107 0"
+                  material="forearm_mat"/>
+            <geom name="forearm" type="capsule" fromto="0 0 -0.04 0 0 -0.31" size="0.041"
+                  material="forearm_mat"/>
+
+            <body name="hand" pos="0 0 -0.34">
+              <geom name="palm" type="box" size="0.065 0.035 0.075" pos="0 0 -0.05" material="hand_mat"/>
+
+              <!-- One logical aperture DOF. The right finger is constrained to mirror the left. -->
+              <body name="left_finger" pos="0.035 0 -0.115">
+                <joint name="hand_aperture_left" type="slide" axis="1 0 0" range="0 0.035" damping="8"/>
+                <geom name="left_finger_geom" type="box" size="0.014 0.025 0.065" pos="0 0 -0.035"
+                      material="hand_mat"/>
+              </body>
+              <body name="right_finger" pos="-0.035 0 -0.115">
+                <joint name="hand_aperture_right" type="slide" axis="-1 0 0" range="0 0.035" damping="8"/>
+                <geom name="right_finger_geom" type="box" size="0.014 0.025 0.065" pos="0 0 -0.035"
+                      material="hand_mat"/>
+              </body>
+
+              <site name="end_effector" type="sphere" size="0.012" pos="0 0 -0.19" rgba="1 0.9 0.1 1"/>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+
+    <!-- Target geoms render in both native MuJoCo and Mjswan; sites retain exact telemetry anchors. -->
+    <geom name="target_1_visual" type="sphere" size="0.035" pos="-0.45 0.22 0.72" material="target_mat"/>
+    <geom name="target_2_visual" type="sphere" size="0.035" pos="-0.30 -0.35 0.82" material="target_mat"/>
+    <geom name="target_3_visual" type="sphere" size="0.035" pos="-0.15 0.38 0.55" material="target_mat"/>
+    <site name="target_1" type="sphere" size="0.001" pos="-0.45 0.22 0.72" rgba="0 0 0 0"/>
+    <site name="target_2" type="sphere" size="0.001" pos="-0.30 -0.35 0.82" rgba="0 0 0 0"/>
+    <site name="target_3" type="sphere" size="0.001" pos="-0.15 0.38 0.55" rgba="0 0 0 0"/>
+  </worldbody>
+
+  <equality>
+    <joint name="symmetric_hand_aperture" joint1="hand_aperture_right" joint2="hand_aperture_left"
+           polycoef="0 1 0 0 0" solref="0.005 1"/>
+  </equality>
+
+  <actuator>
+    <position name="shoulder_flexion_servo" joint="shoulder_flexion" kp="140" kv="22"/>
+    <position name="shoulder_abduction_servo" joint="shoulder_abduction" kp="140" kv="22"/>
+    <position name="forearm_pitch_servo" joint="forearm_pitch" kp="110" kv="16"/>
+    <position name="hand_aperture_servo" joint="hand_aperture_left" kp="900" kv="70"/>
+  </actuator>
+
+  <sensor>
+    <jointpos name="shoulder_flexion_position" joint="shoulder_flexion"/>
+    <jointpos name="shoulder_abduction_position" joint="shoulder_abduction"/>
+    <jointpos name="forearm_pitch_position" joint="forearm_pitch"/>
+    <jointpos name="hand_aperture_position" joint="hand_aperture_left"/>
+    <framepos name="end_effector_position" objtype="site" objname="end_effector"/>
+  </sensor>
+
+  <keyframe>
+    <!-- Keyframe/actuator control values use MuJoCo's internal radians, even with compiler angle="degree". -->
+    <key name="home"
+         qpos="0.1745329252 0.1745329252 0.7853981634 0.015 0.015"
+         ctrl="0.1745329252 0.1745329252 0.7853981634 0.015"/>
+  </keyframe>
+</mujoco>

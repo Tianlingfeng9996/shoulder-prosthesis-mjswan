@@ -1,0 +1,16 @@
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+.pnpm-store/
+web/node_modules/
+web/dist/
+prototype/.venv/
+prototype/logs/
+prototype/__pycache__/
+*.pyc
+MUJOCO_LOG.TXT
+
+# Original CAD stays local unless the owner explicitly decides to publish it.
+*.f3z
+*.f3d

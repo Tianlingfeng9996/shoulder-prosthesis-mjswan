@@ -1,0 +1,55 @@
+{
+  "status": "temporary engineering assumptions; not measured from CAD or hardware",
+  "model_frame": {
+    "forward": "-X",
+    "lateral_abduction": "+Y",
+    "up": "+Z"
+  },
+  "degrees_of_freedom": {
+    "shoulder_flexion": {
+      "label_zh": "肩屈曲/伸展",
+      "minimum_deg": -30.0,
+      "maximum_deg": 100.0,
+      "home_deg": 10.0,
+      "speed_deg_s": 35.0
+    },
+    "shoulder_abduction": {
+      "label_zh": "肩外展/内收",
+      "minimum_deg": -10.0,
+      "maximum_deg": 90.0,
+      "home_deg": 10.0,
+      "speed_deg_s": 35.0
+    },
+    "forearm_pitch": {
+      "label_zh": "前臂前/后（暂按肘/前臂俯仰等效）",
+      "minimum_deg": -20.0,
+      "maximum_deg": 110.0,
+      "home_deg": 45.0,
+      "speed_deg_s": 45.0
+    },
+    "hand_aperture": {
+      "label_zh": "手部开/闭（单侧指滑移）",
+      "minimum_m": 0.0,
+      "maximum_m": 0.035,
+      "home_m": 0.015,
+      "speed_m_s": 0.02
+    }
+  },
+  "keyboard_mapping": {
+    "mode_J1": {
+      "W": "shoulder flexion (+)",
+      "S": "shoulder extension (-)",
+      "A": "shoulder abduction (+)",
+      "D": "shoulder adduction (-)"
+    },
+    "mode_J2": {
+      "W": "forearm forward (+)",
+      "S": "forearm backward (-)",
+      "A": "hand open (+)",
+      "D": "hand close (-)"
+    },
+    "SPACE": "toggle J1/J2",
+    "R": "reset to home",
+    "ESC": "quit"
+  }
+}
