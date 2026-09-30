@@ -1,4 +1,5 @@
 import { createEngine, type MjswanEngine } from 'mjswan';
+import { COPY, isLocale, loadLocale, saveLocale, type Locale } from './i18n';
 import './style.css';
 
 type NumericArray = { [index: number]: number; length: number; fill(value: number): void };
@@ -30,7 +31,6 @@ const HOME = [10 * RAD, 10 * RAD, 45 * RAD, 0.015] as const;
 const LOWER = [-30 * RAD, -10 * RAD, -20 * RAD, 0] as const;
 const UPPER = [100 * RAD, 90 * RAD, 110 * RAD, 0.035] as const;
 const SPEED = [35 * RAD, 35 * RAD, 45 * RAD, 0.02] as const;
-const LABELS = ['肩屈伸', '肩外展/内收', '前臂前后', '手部开闭'] as const;
 const TARGETS = [
   [-0.45, 0.22, 0.72],
   [-0.30, -0.35, 0.82],
@@ -40,26 +40,47 @@ const TARGET_RADIUS = 0.065;
 const DWELL_SECONDS = 0.75;
 const PHYSICS_DT = 0.002;
 
+type LoadFailure =
+  | { code: 'http'; status: number }
+  | { code: 'no-data' }
+  | { code: 'no-site' }
+  | { code: 'unknown'; message: string };
+
+class LoadError extends Error {
+  constructor(readonly failure: LoadFailure) {
+    super(failure.code);
+    this.name = 'LoadError';
+  }
+}
+
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('Missing #app');
+
+let locale: Locale = loadLocale();
+
+const copy = (): (typeof COPY)[Locale] => COPY[locale];
 
 app.innerHTML = `
   <main class="shell">
     <header class="topbar">
       <div>
         <p class="eyebrow">MUJOCO · MJSWAN · 4-DOF</p>
-        <h1>肩义手虚拟控制实验</h1>
+        <h1 id="page-title"></h1>
       </div>
       <div class="status-cluster">
-        <span id="engine-status" class="status loading">正在加载模型</span>
-        <span id="mode-badge" class="mode-badge">J1 · 肩部</span>
+        <div class="lang-toggle" id="lang-toggle" role="group">
+          <button type="button" id="lang-ja" data-locale="ja">日本語</button>
+          <button type="button" id="lang-zh" data-locale="zh">中文</button>
+        </div>
+        <span id="engine-status" class="status loading"></span>
+        <span id="mode-badge" class="mode-badge"></span>
       </div>
     </header>
 
     <section class="workspace">
       <div class="viewer-card">
         <div id="viewer" aria-label="MuJoCo 3D simulation"></div>
-        <div class="viewer-hint">拖动旋转 · 滚轮缩放 · 红球为任务目标</div>
+        <div id="viewer-hint" class="viewer-hint"></div>
         <div id="load-error" class="load-error hidden"></div>
       </div>
 
@@ -68,19 +89,19 @@ app.innerHTML = `
           <div class="section-heading">
             <div>
               <span class="section-kicker">TASK</span>
-              <h2>目标到达实验</h2>
+              <h2 id="task-title"></h2>
             </div>
-            <span id="trial-state" class="trial-state">未开始</span>
+            <span id="trial-state" class="trial-state"></span>
           </div>
           <div class="metric-grid">
-            <div><span>目标</span><strong id="target-index">1 / 3</strong></div>
-            <div><span>末端误差</span><strong id="distance">—</strong></div>
-            <div><span>停留</span><strong id="dwell">0.00 s</strong></div>
-            <div><span>切换次数</span><strong id="switch-count">0</strong></div>
+            <div><span id="metric-target-label"></span><strong id="target-index">1 / 3</strong></div>
+            <div><span id="metric-error-label"></span><strong id="distance">—</strong></div>
+            <div><span id="metric-dwell-label"></span><strong id="dwell">0.00 s</strong></div>
+            <div><span id="metric-switches-label"></span><strong id="switch-count">0</strong></div>
           </div>
           <div class="button-row">
-            <button id="start-trial" class="primary">开始实验</button>
-            <button id="download-csv" disabled>下载 CSV</button>
+            <button id="start-trial" class="primary"></button>
+            <button id="download-csv" disabled></button>
           </div>
         </section>
 
@@ -88,22 +109,22 @@ app.innerHTML = `
           <div class="section-heading">
             <div>
               <span class="section-kicker">CONTROL</span>
-              <h2 id="control-title">J1 · 肩屈伸 / 肩外展内收</h2>
+              <h2 id="control-title"></h2>
             </div>
             <button id="toggle-mode" class="key-button">Space</button>
           </div>
 
-          <div class="joystick-grid" aria-label="触屏方向控制">
-            <button class="joy up" data-key="w"><kbd>W</kbd><span id="label-w">肩屈曲</span></button>
-            <button class="joy left" data-key="a"><kbd>A</kbd><span id="label-a">肩外展</span></button>
-            <div class="stick-center"><span>J1</span></div>
-            <button class="joy right" data-key="d"><kbd>D</kbd><span id="label-d">肩内收</span></button>
-            <button class="joy down" data-key="s"><kbd>S</kbd><span id="label-s">肩伸展</span></button>
+          <div class="joystick-grid" id="joystick">
+            <button class="joy up" data-key="w"><kbd>W</kbd><span id="label-w"></span></button>
+            <button class="joy left" data-key="a"><kbd>A</kbd><span id="label-a"></span></button>
+            <div class="stick-center"><span id="stick-label">J1</span></div>
+            <button class="joy right" data-key="d"><kbd>D</kbd><span id="label-d"></span></button>
+            <button class="joy down" data-key="s"><kbd>S</kbd><span id="label-s"></span></button>
           </div>
 
           <div class="button-row utility-row">
-            <button id="reset"><kbd>R</kbd> 复位</button>
-            <button id="frame-camera">重新取景</button>
+            <button id="reset"><kbd>R</kbd> <span id="reset-label"></span></button>
+            <button id="frame-camera"></button>
           </div>
         </section>
 
@@ -111,13 +132,20 @@ app.innerHTML = `
           <div class="section-heading">
             <div>
               <span class="section-kicker">TELEMETRY</span>
-              <h2>实时关节状态</h2>
+              <h2 id="telemetry-title"></h2>
             </div>
           </div>
-          <div id="joint-list" class="joint-list"></div>
+          <div id="joint-list" class="joint-list">
+            ${[0, 1, 2, 3].map((index) => `
+              <div class="joint-row">
+                <div><span id="joint-label-${index}"></span><strong id="joint-value-${index}">—</strong></div>
+                <div class="track"><i id="joint-bar-${index}"></i></div>
+              </div>
+            `).join('')}
+          </div>
         </section>
 
-        <p class="disclaimer">等效运动学原型：几何、轴线、限位和动力学参数尚未由真实 Fusion 机构验证。</p>
+        <p id="disclaimer" class="disclaimer"></p>
       </aside>
     </section>
   </main>
@@ -133,9 +161,8 @@ const viewer = byId<HTMLDivElement>('viewer');
 const statusElement = byId<HTMLSpanElement>('engine-status');
 const modeBadge = byId<HTMLSpanElement>('mode-badge');
 const controlTitle = byId<HTMLHeadingElement>('control-title');
-const stickCenter = document.querySelector<HTMLDivElement>('.stick-center span')!;
+const stickCenter = byId<HTMLSpanElement>('stick-label');
 const loadError = byId<HTMLDivElement>('load-error');
-const jointList = byId<HTMLDivElement>('joint-list');
 const trialState = byId<HTMLSpanElement>('trial-state');
 const targetIndexElement = byId<HTMLSpanElement>('target-index');
 const distanceElement = byId<HTMLSpanElement>('distance');
@@ -144,15 +171,10 @@ const switchCountElement = byId<HTMLSpanElement>('switch-count');
 const startTrialButton = byId<HTMLButtonElement>('start-trial');
 const downloadButton = byId<HTMLButtonElement>('download-csv');
 
-jointList.innerHTML = LABELS.map((label, index) => `
-  <div class="joint-row">
-    <div><span>${label}</span><strong id="joint-value-${index}">—</strong></div>
-    <div class="track"><i id="joint-bar-${index}"></i></div>
-  </div>
-`).join('');
-
 let engine: InternalEngine | null = null;
 let data: MjDataAccess | null = null;
+let enginePhase: 'loading' | 'ready' | 'error' = 'loading';
+let loadFailure: LoadFailure | null = null;
 let mode: 0 | 1 = 0;
 let targets = [...HOME];
 let lastFrame = performance.now();
@@ -204,19 +226,104 @@ function resetSimulation(): void {
   physicsAccumulator = 0;
 }
 
+function renderControlLabels(): void {
+  const text = copy();
+  const j1 = mode === 0;
+  modeBadge.textContent = j1 ? text.modeJ1Badge : text.modeJ2Badge;
+  controlTitle.textContent = j1 ? text.modeJ1Title : text.modeJ2Title;
+  stickCenter.textContent = j1 ? 'J1' : 'J2';
+  byId('label-w').textContent = j1 ? text.labelFlexion : text.labelForearmForward;
+  byId('label-s').textContent = j1 ? text.labelExtension : text.labelForearmBack;
+  byId('label-a').textContent = j1 ? text.labelAbduction : text.labelHandOpen;
+  byId('label-d').textContent = j1 ? text.labelAdduction : text.labelHandClose;
+}
+
+function renderTrialChrome(): void {
+  const text = copy();
+  const phase = trialComplete ? 'complete' : trialActive ? 'running' : 'idle';
+  trialState.textContent = phase === 'complete' ? text.trialComplete : phase === 'running' ? text.trialRunning : text.trialIdle;
+  trialState.classList.toggle('complete', phase === 'complete');
+  startTrialButton.textContent = phase === 'idle' ? text.startTrial : text.restartTrial;
+  if (trialComplete) targetIndexElement.textContent = text.targetDone;
+}
+
+function failureText(failure: LoadFailure): string {
+  const text = copy();
+  switch (failure.code) {
+    case 'http':
+      return text.modelDownloadFailed(failure.status);
+    case 'no-data':
+      return text.noMjData;
+    case 'no-site':
+      return text.noEndEffector;
+    case 'unknown':
+      return failure.message;
+  }
+}
+
+function renderStatus(): void {
+  const text = copy();
+  if (enginePhase === 'ready') {
+    statusElement.textContent = text.ready;
+    statusElement.className = 'status ready';
+    return;
+  }
+  if (enginePhase === 'error') {
+    statusElement.textContent = text.loadFailed;
+    statusElement.className = 'status error';
+    if (loadFailure) {
+      loadError.textContent = failureText(loadFailure);
+      loadError.classList.remove('hidden');
+    }
+    return;
+  }
+  statusElement.textContent = text.loading;
+  statusElement.className = 'status loading';
+}
+
+function applyCopy(): void {
+  const text = copy();
+  document.documentElement.lang = text.htmlLang;
+  document.title = text.title;
+  document.querySelector('meta[name="description"]')?.setAttribute('content', text.description);
+  byId('page-title').textContent = text.title;
+  byId('viewer-hint').textContent = text.viewerHint;
+  byId('task-title').textContent = text.taskTitle;
+  byId('metric-target-label').textContent = text.metricTarget;
+  byId('metric-error-label').textContent = text.metricError;
+  byId('metric-dwell-label').textContent = text.metricDwell;
+  byId('metric-switches-label').textContent = text.metricSwitches;
+  downloadButton.textContent = text.downloadCsv;
+  byId('reset-label').textContent = text.reset;
+  byId('frame-camera').textContent = text.frameCamera;
+  byId('telemetry-title').textContent = text.telemetryTitle;
+  byId('disclaimer').textContent = text.disclaimer;
+  byId('joystick').setAttribute('aria-label', text.joyAria);
+  byId('lang-toggle').setAttribute('aria-label', text.langAria);
+  text.joints.forEach((label, index) => {
+    byId(`joint-label-${index}`).textContent = label;
+  });
+  byId('lang-ja').setAttribute('aria-pressed', locale === 'ja' ? 'true' : 'false');
+  byId('lang-zh').setAttribute('aria-pressed', locale === 'zh' ? 'true' : 'false');
+  renderControlLabels();
+  renderTrialChrome();
+  renderStatus();
+  if (data) updateTelemetry();
+}
+
+function setLocale(next: Locale): void {
+  if (next === locale) return;
+  locale = next;
+  saveLocale(locale);
+  applyCopy();
+}
+
 function setMode(nextMode: 0 | 1, countSwitch = true): void {
   if (nextMode === mode) return;
   mode = nextMode;
   if (countSwitch && trialActive) modeSwitches += 1;
   clearInput();
-  const j1 = mode === 0;
-  modeBadge.textContent = j1 ? 'J1 · 肩部' : 'J2 · 前臂 / 手';
-  controlTitle.textContent = j1 ? 'J1 · 肩屈伸 / 肩外展内收' : 'J2 · 前臂前后 / 手部开闭';
-  stickCenter.textContent = j1 ? 'J1' : 'J2';
-  byId('label-w').textContent = j1 ? '肩屈曲' : '前臂前';
-  byId('label-s').textContent = j1 ? '肩伸展' : '前臂后';
-  byId('label-a').textContent = j1 ? '肩外展' : '手打开';
-  byId('label-d').textContent = j1 ? '肩内收' : '手闭合';
+  renderControlLabels();
   switchCountElement.textContent = String(modeSwitches);
 }
 
@@ -252,7 +359,7 @@ function updateTelemetry(): void {
   distanceElement.textContent = `${(distance * 1000).toFixed(0)} mm`;
   distanceElement.classList.toggle('success-text', distance <= TARGET_RADIUS);
   dwellElement.textContent = `${dwell.toFixed(2)} s`;
-  targetIndexElement.textContent = trialComplete ? '完成' : `${targetIndex + 1} / ${TARGETS.length}`;
+  targetIndexElement.textContent = trialComplete ? copy().targetDone : `${targetIndex + 1} / ${TARGETS.length}`;
   switchCountElement.textContent = String(modeSwitches);
 }
 
@@ -265,9 +372,7 @@ function updateTask(dt: number): void {
       if (targetIndex + 1 >= TARGETS.length) {
         trialComplete = true;
         trialActive = false;
-        trialState.textContent = '已完成';
-        trialState.classList.add('complete');
-        startTrialButton.textContent = '重新开始';
+        renderTrialChrome();
       } else {
         targetIndex += 1;
       }
@@ -277,6 +382,7 @@ function updateTask(dt: number): void {
   }
 }
 
+// Column headers stay English so exported trials remain machine-readable.
 const CSV_HEADER = [
   'sim_time_s', 'trial_time_s', 'mode', 'vertical_input', 'horizontal_input',
   'shoulder_flexion_deg', 'shoulder_abduction_deg', 'forearm_pitch_deg',
@@ -327,9 +433,7 @@ function startTrial(): void {
   trialStartSimTime = data.time;
   lastLogTime = -Infinity;
   logRows = [];
-  trialState.textContent = '进行中';
-  trialState.classList.remove('complete');
-  startTrialButton.textContent = '重新开始';
+  renderTrialChrome();
   downloadButton.disabled = true;
   updateTelemetry();
 }
@@ -421,12 +525,18 @@ byId('reset').addEventListener('click', resetSimulation);
 byId('frame-camera').addEventListener('click', () => engine?.camera.frame());
 startTrialButton.addEventListener('click', startTrial);
 downloadButton.addEventListener('click', downloadCsv);
+document.querySelectorAll<HTMLButtonElement>('[data-locale]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const next = button.dataset.locale ?? null;
+    if (isLocale(next)) setLocale(next);
+  });
+});
 
 async function boot(): Promise<void> {
   try {
     const publicBase = import.meta.env.BASE_URL;
     const modelResponse = await fetch(`${publicBase}model/shoulder_prosthesis_simplified.mjz`);
-    if (!modelResponse.ok) throw new Error(`模型下载失败：HTTP ${modelResponse.status}`);
+    if (!modelResponse.ok) throw new LoadError({ code: 'http', status: modelResponse.status });
 
     const publicEngine = await createEngine(viewer, { multithreaded: false });
     engine = publicEngine as InternalEngine;
@@ -444,30 +554,31 @@ async function boot(): Promise<void> {
     engine.pause();
     await engine.runtime.stop();
     data = engine.runtime.mjData;
-    if (!data) throw new Error('Mjswan 已加载，但无法取得 MuJoCo 状态。');
+    if (!data) throw new LoadError({ code: 'no-data' });
     for (let index = 0; index < engine.runtime.mjModel.nsite; index += 1) {
       if (engine.runtime.mjModel.site(index).name.endsWith('end_effector')) {
         endEffectorSiteId = index;
         break;
       }
     }
-    if (endEffectorSiteId < 0) throw new Error('模型中找不到 end_effector site。');
+    if (endEffectorSiteId < 0) throw new LoadError({ code: 'no-site' });
     resetSimulation();
     // Deliberately keep Mjswan's policy loop paused; update() owns physics stepping.
-    statusElement.textContent = '仿真已就绪';
-    statusElement.className = 'status ready';
+    enginePhase = 'ready';
+    renderStatus();
     startTrialButton.disabled = false;
     updateTelemetry();
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    statusElement.textContent = '加载失败';
-    statusElement.className = 'status error';
-    loadError.textContent = message;
-    loadError.classList.remove('hidden');
+    enginePhase = 'error';
+    loadFailure = error instanceof LoadError
+      ? error.failure
+      : { code: 'unknown', message: error instanceof Error ? error.message : String(error) };
+    renderStatus();
     console.error(error);
   }
 }
 
+applyCopy();
 startTrialButton.disabled = true;
 requestAnimationFrame(update);
 void boot();
