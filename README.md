@@ -7,11 +7,11 @@ The first visit downloads the browser MuJoCo runtime and can take about a minute
 An interactive four-degree-of-freedom shoulder-prosthesis control prototype powered by
 MuJoCo and the Mjswan browser engine.
 
-The on-screen UI defaults to Japanese. A **日本語 / 中文** toggle in the header switches to Chinese and remembers the choice in this browser.
+The on-screen UI defaults to Japanese. A **日本語 / 中文 / English** toggle in the header switches language and remembers the choice in this browser.
 
 The public web version supports:
 
-- Japanese and Chinese interface (日本語 by default);
+- Japanese, Chinese, and English interface (日本語 by default);
 - J1/J2 control modes;
 - keyboard and touch controls;
 - position hold when input is released;

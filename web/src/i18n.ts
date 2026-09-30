@@ -1,4 +1,4 @@
-export type Locale = 'ja' | 'zh';
+export type Locale = 'ja' | 'zh' | 'en';
 
 export type Copy = {
   htmlLang: string;
@@ -133,12 +133,57 @@ const zh: Copy = {
   langAria: '界面语言',
 };
 
-export const COPY: Record<Locale, Copy> = { ja, zh };
+const en: Copy = {
+  htmlLang: 'en',
+  title: 'Shoulder Prosthesis Virtual Control',
+  description: 'Four-degree-of-freedom MuJoCo/Mjswan browser control prototype for a shoulder prosthesis',
+  loading: 'Loading model',
+  ready: 'Simulation ready',
+  loadFailed: 'Load failed',
+  modelDownloadFailed: (status) => `Model download failed: HTTP ${status}`,
+  noMjData: 'Mjswan loaded, but the MuJoCo state is unavailable.',
+  noEndEffector: 'The model has no end_effector site.',
+  viewerHint: 'Drag to rotate · Scroll to zoom · Red spheres are targets',
+  taskTitle: 'Reach-target trial',
+  trialIdle: 'Not started',
+  trialRunning: 'In progress',
+  trialComplete: 'Complete',
+  metricTarget: 'Target',
+  metricError: 'Tip error',
+  metricDwell: 'Dwell',
+  metricSwitches: 'Switches',
+  targetDone: 'Done',
+  startTrial: 'Start trial',
+  restartTrial: 'Restart',
+  downloadCsv: 'Download CSV',
+  modeJ1Badge: 'J1 · Shoulder',
+  modeJ2Badge: 'J2 · Forearm / hand',
+  modeJ1Title: 'J1 · Shoulder flex/ext / abd/add',
+  modeJ2Title: 'J2 · Forearm pitch / hand open-close',
+  joyAria: 'Touch direction controls',
+  labelFlexion: 'Flexion',
+  labelExtension: 'Extension',
+  labelAbduction: 'Abduction',
+  labelAdduction: 'Adduction',
+  labelForearmForward: 'Forearm fwd',
+  labelForearmBack: 'Forearm back',
+  labelHandOpen: 'Hand open',
+  labelHandClose: 'Hand close',
+  reset: 'Reset',
+  frameCamera: 'Reframe',
+  telemetryTitle: 'Live joint state',
+  joints: ['Shoulder flex/ext', 'Shoulder abd/add', 'Forearm pitch', 'Hand open/close'],
+  disclaimer:
+    'Equivalent kinematic prototype. Geometry, axes, limits, and inertial parameters have not been verified against the real Fusion mechanism.',
+  langAria: 'Language',
+};
+
+export const COPY: Record<Locale, Copy> = { ja, zh, en };
 
 const STORAGE_KEY = 'shoulder-ui-locale';
 
 export function isLocale(value: string | null): value is Locale {
-  return value === 'ja' || value === 'zh';
+  return value === 'ja' || value === 'zh' || value === 'en';
 }
 
 export function loadLocale(): Locale {

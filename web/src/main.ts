@@ -71,6 +71,7 @@ app.innerHTML = `
         <div class="lang-toggle" id="lang-toggle" role="group">
           <button type="button" id="lang-ja" data-locale="ja">日本語</button>
           <button type="button" id="lang-zh" data-locale="zh">中文</button>
+          <button type="button" id="lang-en" data-locale="en">English</button>
         </div>
         <span id="engine-status" class="status loading"></span>
         <span id="mode-badge" class="mode-badge"></span>
@@ -305,6 +306,7 @@ function applyCopy(): void {
   });
   byId('lang-ja').setAttribute('aria-pressed', locale === 'ja' ? 'true' : 'false');
   byId('lang-zh').setAttribute('aria-pressed', locale === 'zh' ? 'true' : 'false');
+  byId('lang-en').setAttribute('aria-pressed', locale === 'en' ? 'true' : 'false');
   renderControlLabels();
   renderTrialChrome();
   renderStatus();
