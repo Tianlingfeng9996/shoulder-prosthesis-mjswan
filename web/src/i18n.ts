@@ -42,6 +42,26 @@ export type Copy = {
   joints: readonly [string, string, string, string];
   disclaimer: string;
   langAria: string;
+  appModeAria: string;
+  modeDemo: string;
+  modePap: string;
+  papTitle: string;
+  papIdle: string;
+  papRunning: string;
+  papComplete: string;
+  papLegend: string;
+  papMetricPlaced: string;
+  papMetricRemaining: string;
+  papMetricTime: string;
+  papMetricHold: string;
+  papHoldNone: string;
+  papHolding: (index: number) => string;
+  papStart: string;
+  papRestart: string;
+  papHint: string;
+  papBannerTitle: string;
+  papBannerDetail: (time: string) => string;
+  viewerHintPap: string;
 };
 
 const ja: Copy = {
@@ -87,6 +107,27 @@ const ja: Copy = {
   disclaimer:
     '等価運動学プロトタイプです。形状、回転軸、可動範囲、動力学パラメータは、実機の Fusion 機構では未検証です。',
   langAria: '表示言語',
+  appModeAria: '実験モード',
+  modeDemo: '到達デモ',
+  modePap: '把持移動',
+  papTitle: 'ピックアンドプレース',
+  papIdle: '未開始',
+  papRunning: '実施中',
+  papComplete: '試行完了',
+  papLegend: 'A 青・左 → B 橙・右',
+  papMetricPlaced: '右ゾーン B',
+  papMetricRemaining: '残り',
+  papMetricTime: '経過',
+  papMetricHold: '把持',
+  papHoldNone: 'なし',
+  papHolding: (index) => `立方体 ${index}`,
+  papStart: '試行開始',
+  papRestart: 'もう一度',
+  papHint:
+    '指先を立方体に近づけ、J2のDでつかみ、Aで放します。J1のW/Sで左右（A側/B側）、Aで手前、Dで奥。J2のW/Sで上げ下げ。台の上の5個を右のBへ。',
+  papBannerTitle: '試行完了',
+  papBannerDetail: (time) => `5個すべてがゾーンBに入りました（${time}）`,
+  viewerHintPap: 'ドラッグで回転 · 青がA（左）· 橙がB（右）',
 };
 
 const zh: Copy = {
@@ -131,6 +172,27 @@ const zh: Copy = {
   joints: ['肩屈伸', '肩外展/内收', '前臂前后', '手部开闭'],
   disclaimer: '等效运动学原型：几何、轴线、限位和动力学参数尚未由真实 Fusion 机构验证。',
   langAria: '界面语言',
+  appModeAria: '实验模式',
+  modeDemo: '到达演示',
+  modePap: '抓取放置',
+  papTitle: '拾取放置实验',
+  papIdle: '未开始',
+  papRunning: '进行中',
+  papComplete: '试验完成',
+  papLegend: 'A 蓝·左 → B 橙·右',
+  papMetricPlaced: '右区 B',
+  papMetricRemaining: '剩余',
+  papMetricTime: '用时',
+  papMetricHold: '抓持',
+  papHoldNone: '无',
+  papHolding: (index) => `方块 ${index}`,
+  papStart: '开始试验',
+  papRestart: '再来一次',
+  papHint:
+    '把指尖靠近方块，J2 的 D 抓住、A 放开。J1 的 W/S 左右（A/B），A 靠近、D 远离。J2 的 W/S 升降。将台上的五个方块放到右侧 B 区。',
+  papBannerTitle: '试验完成',
+  papBannerDetail: (time) => `五个方块都已进入 B 区（${time}）`,
+  viewerHintPap: '拖动旋转 · 蓝色为 A（左）· 橙色为 B（右）',
 };
 
 const en: Copy = {
@@ -176,6 +238,27 @@ const en: Copy = {
   disclaimer:
     'Equivalent kinematic prototype. Geometry, axes, limits, and inertial parameters have not been verified against the real Fusion mechanism.',
   langAria: 'Language',
+  appModeAria: 'Experiment mode',
+  modeDemo: 'Reach demo',
+  modePap: 'Pick & place',
+  papTitle: 'Pick-and-place trial',
+  papIdle: 'Not started',
+  papRunning: 'In progress',
+  papComplete: 'Trial complete',
+  papLegend: 'A blue · left → B orange · right',
+  papMetricPlaced: 'Zone B',
+  papMetricRemaining: 'Remaining',
+  papMetricTime: 'Elapsed',
+  papMetricHold: 'Grasp',
+  papHoldNone: 'None',
+  papHolding: (index) => `Cube ${index}`,
+  papStart: 'Start trial',
+  papRestart: 'New trial',
+  papHint:
+    'Bring a fingertip next to a cube. J2 D grasps, A releases. J1 W/S moves left/right (A/B), A toward you, D away. J2 W/S raises and lowers. Move all 5 from the stands into zone B.',
+  papBannerTitle: 'Trial complete',
+  papBannerDetail: (time) => `All 5 cubes are in zone B (${time})`,
+  viewerHintPap: 'Drag to rotate · Blue is A (left) · Orange is B (right)',
 };
 
 export const COPY: Record<Locale, Copy> = { ja, zh, en };

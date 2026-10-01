@@ -2,6 +2,12 @@
   <!--
     Equivalent kinematic prototype, not a CAD-derived mechanism model.
     Dimensions, axes, limits and inertial properties below are temporary.
+
+    Pick-and-place contacts are compiled in so MuJoCo keeps the pairs. The home
+    keyframe parks that stage and the cubes below the floor; the web app lifts
+    them into the workspace only in PAP experiment mode. World gravity stays off
+    so the arm tracks the same way as the reach demo. The web app applies cube
+    weight directly while a PAP trial is running.
   -->
   <compiler angle="degree" autolimits="true"/>
   <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
@@ -17,6 +23,15 @@
     <geom contype="0" conaffinity="0" density="800" friction="0.8 0.02 0.001"
           rgba="0.28 0.48 0.72 1"/>
     <position kp="120" kv="18"/>
+    <default class="pap_contact">
+      <geom contype="1" conaffinity="1" condim="3" friction="1.2 0.01 0.001"
+            solref="0.008 1" solimp="0.95 0.99 0.001 0.5 2"/>
+    </default>
+    <default class="cube">
+      <geom contype="1" conaffinity="1" condim="4" friction="2.2 0.06 0.002"
+            solref="0.008 1" solimp="0.95 0.99 0.001 0.5 2" density="420" priority="1"/>
+      <joint damping="0.04" armature="0.00002"/>
+    </default>
   </default>
 
   <asset>
@@ -25,6 +40,9 @@
     <material name="forearm_mat" rgba="0.18 0.68 0.58 1"/>
     <material name="hand_mat" rgba="0.90 0.58 0.20 1"/>
     <material name="target_mat" rgba="0.95 0.18 0.18 0.70"/>
+    <material name="zone_a_mat" rgba="0.16 0.46 0.95 1"/>
+    <material name="zone_b_mat" rgba="0.95 0.50 0.14 1"/>
+    <material name="letter_mat" rgba="0.04 0.07 0.12 1"/>
   </asset>
 
   <worldbody>
@@ -60,15 +78,16 @@
             <body name="hand" pos="0 0 -0.34">
               <geom name="palm" type="box" size="0.065 0.035 0.075" pos="0 0 -0.05" material="hand_mat"/>
 
-              <!-- One logical aperture DOF. The right finger is constrained to mirror the left. -->
-              <body name="left_finger" pos="0.035 0 -0.115">
-                <joint name="hand_aperture_left" type="slide" axis="1 0 0" range="0 0.035" damping="8"/>
-                <geom name="left_finger_geom" type="box" size="0.014 0.025 0.065" pos="0 0 -0.035"
+              <!-- One logical aperture DOF. The right finger is constrained to mirror the left.
+                   Pads stay clear of cube contacts; the web app attaches a nearby cube when the hand closes. -->
+              <body name="left_finger" pos="0.024 0 -0.118">
+                <joint name="hand_aperture_left" type="slide" axis="1 0 0" range="0 0.035" damping="3" armature="0.001"/>
+                <geom name="left_finger_geom" type="box" size="0.010 0.016 0.014" pos="0 0 -0.064"
                       material="hand_mat"/>
               </body>
-              <body name="right_finger" pos="-0.035 0 -0.115">
-                <joint name="hand_aperture_right" type="slide" axis="-1 0 0" range="0 0.035" damping="8"/>
-                <geom name="right_finger_geom" type="box" size="0.014 0.025 0.065" pos="0 0 -0.035"
+              <body name="right_finger" pos="-0.024 0 -0.118">
+                <joint name="hand_aperture_right" type="slide" axis="-1 0 0" range="0 0.035" damping="3" armature="0.001"/>
+                <geom name="right_finger_geom" type="box" size="0.010 0.016 0.014" pos="0 0 -0.064"
                       material="hand_mat"/>
               </body>
 
@@ -77,6 +96,72 @@
           </body>
         </body>
       </body>
+    </body>
+
+    <!--
+      PAP stage. With the demo camera replaced by azimuth 90, -X is screen-left (zone A)
+      and +X is screen-right (zone B). Platform top is z=0.25. The free joint is locked
+      from the web app so the table cannot fall when gravity is enabled.
+    -->
+    <body name="pap_stage" pos="0 0 0">
+      <freejoint name="pap_stage_free"/>
+      <inertial pos="0 0 0" mass="200" diaginertia="8 8 8"/>
+      <geom name="pap_platform" class="pap_contact" type="box" size="0.50 0.34 0.018" pos="0 0.02 0.232"
+            rgba="0.14 0.16 0.20 1"/>
+      <geom name="pap_zone_a" type="box" size="0.12 0.18 0.001" pos="-0.17 0.02 0.2506" material="zone_a_mat"/>
+      <geom name="pap_zone_b" type="box" size="0.12 0.18 0.001" pos="0.17 0.02 0.2506" material="zone_b_mat"/>
+      <!-- Narrow pedestals lift the cubes into the pinch without the fingertips hitting the mat. -->
+      <geom name="pap_pedestal_1" class="pap_contact" type="box" size="0.007 0.007 0.018" pos="-0.24 0.10 0.268" rgba="0.28 0.32 0.38 1"/>
+      <geom name="pap_pedestal_2" class="pap_contact" type="box" size="0.007 0.007 0.018" pos="-0.24 0.00 0.268" rgba="0.28 0.32 0.38 1"/>
+      <geom name="pap_pedestal_3" class="pap_contact" type="box" size="0.007 0.007 0.018" pos="-0.24 -0.10 0.268" rgba="0.28 0.32 0.38 1"/>
+      <geom name="pap_pedestal_4" class="pap_contact" type="box" size="0.007 0.007 0.018" pos="-0.14 0.06 0.268" rgba="0.28 0.32 0.38 1"/>
+      <geom name="pap_pedestal_5" class="pap_contact" type="box" size="0.007 0.007 0.018" pos="-0.14 -0.06 0.268" rgba="0.28 0.32 0.38 1"/>
+      <!-- Rims sit outside the hand's reachable pinch so they do not block a top-down grasp. -->
+      <geom name="pap_rim_nx" class="pap_contact" type="box" size="0.012 0.34 0.012" pos="-0.488 0.02 0.274"
+            rgba="0.22 0.26 0.32 1"/>
+      <geom name="pap_rim_px" class="pap_contact" type="box" size="0.012 0.34 0.012" pos="0.488 0.02 0.274"
+            rgba="0.22 0.26 0.32 1"/>
+      <geom name="pap_rim_ny" class="pap_contact" type="box" size="0.50 0.012 0.012" pos="0 -0.308 0.274"
+            rgba="0.22 0.26 0.32 1"/>
+      <geom name="pap_rim_py" class="pap_contact" type="box" size="0.50 0.012 0.012" pos="0 0.348 0.274"
+            rgba="0.22 0.26 0.32 1"/>
+      <!-- Block letters sit on the near edge of each mat (toward +Y, the PAP camera). -->
+      <geom name="pap_letter_a_l" type="box" size="0.006 0.004 0.032" pos="-0.188 0.155 0.298"
+            euler="0 24 0" material="letter_mat"/>
+      <geom name="pap_letter_a_r" type="box" size="0.006 0.004 0.032" pos="-0.152 0.155 0.298"
+            euler="0 -24 0" material="letter_mat"/>
+      <geom name="pap_letter_a_bar" type="box" size="0.016 0.004 0.006" pos="-0.170 0.155 0.290"
+            material="letter_mat"/>
+      <geom name="pap_letter_b_spine" type="box" size="0.006 0.004 0.032" pos="0.150 0.155 0.298"
+            material="letter_mat"/>
+      <geom name="pap_letter_b_top" type="box" size="0.016 0.004 0.011" pos="0.168 0.155 0.316"
+            material="letter_mat"/>
+      <geom name="pap_letter_b_mid" type="box" size="0.014 0.004 0.006" pos="0.166 0.155 0.298"
+            material="letter_mat"/>
+      <geom name="pap_letter_b_bot" type="box" size="0.016 0.004 0.011" pos="0.168 0.155 0.280"
+            material="letter_mat"/>
+    </body>
+
+    <!-- 24 mm cubes fit inside the closed pinch (26 mm) and rest 1 mm above the pedestals. -->
+    <body name="pap_cube_1" pos="-0.24 0.10 0.299" childclass="cube">
+      <freejoint name="pap_cube_1_free"/>
+      <geom name="pap_cube_1_geom" type="box" size="0.012 0.012 0.012" rgba="0.96 0.82 0.22 1"/>
+    </body>
+    <body name="pap_cube_2" pos="-0.24 0.00 0.299" childclass="cube">
+      <freejoint name="pap_cube_2_free"/>
+      <geom name="pap_cube_2_geom" type="box" size="0.012 0.012 0.012" rgba="0.93 0.94 0.96 1"/>
+    </body>
+    <body name="pap_cube_3" pos="-0.24 -0.10 0.299" childclass="cube">
+      <freejoint name="pap_cube_3_free"/>
+      <geom name="pap_cube_3_geom" type="box" size="0.012 0.012 0.012" rgba="0.90 0.42 0.38 1"/>
+    </body>
+    <body name="pap_cube_4" pos="-0.14 0.06 0.299" childclass="cube">
+      <freejoint name="pap_cube_4_free"/>
+      <geom name="pap_cube_4_geom" type="box" size="0.012 0.012 0.012" rgba="0.42 0.82 0.55 1"/>
+    </body>
+    <body name="pap_cube_5" pos="-0.14 -0.06 0.299" childclass="cube">
+      <freejoint name="pap_cube_5_free"/>
+      <geom name="pap_cube_5_geom" type="box" size="0.012 0.012 0.012" rgba="0.62 0.48 0.92 1"/>
     </body>
 
     <!-- Target geoms render in both native MuJoCo and Mjswan; sites retain exact telemetry anchors. -->
@@ -97,7 +182,7 @@
     <position name="shoulder_flexion_servo" joint="shoulder_flexion" kp="140" kv="22"/>
     <position name="shoulder_abduction_servo" joint="shoulder_abduction" kp="140" kv="22"/>
     <position name="forearm_pitch_servo" joint="forearm_pitch" kp="110" kv="16"/>
-    <position name="hand_aperture_servo" joint="hand_aperture_left" kp="900" kv="70"/>
+    <position name="hand_aperture_servo" joint="hand_aperture_left" kp="420" kv="22" forcerange="-18 18"/>
   </actuator>
 
   <sensor>
@@ -111,7 +196,7 @@
   <keyframe>
     <!-- Keyframe/actuator control values use MuJoCo's internal radians, even with compiler angle="degree". -->
     <key name="home"
-         qpos="0.1745329252 0.1745329252 0.7853981634 0.015 0.015"
+         qpos="0.1745329252 0.1745329252 0.7853981634 0.015 0.015 0 0 -8 1 0 0 0 -0.24 0.10 -8 1 0 0 0 -0.24 0.00 -8 1 0 0 0 -0.24 -0.10 -8 1 0 0 0 -0.14 0.06 -8 1 0 0 0 -0.14 -0.06 -8 1 0 0 0"
          ctrl="0.1745329252 0.1745329252 0.7853981634 0.015"/>
   </keyframe>
 </mujoco>

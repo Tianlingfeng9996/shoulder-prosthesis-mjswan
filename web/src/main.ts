@@ -1,5 +1,37 @@
 import { createEngine, type MjswanEngine } from 'mjswan';
 import { COPY, isLocale, loadLocale, saveLocale, type Locale } from './i18n';
+import {
+  CUBE_COUNT,
+  CUBE_NAMES,
+  CUBE_SPAWN,
+  DEMO_CAMERA,
+  GRASP_CLOSE,
+  GRASP_RELEASE,
+  HAND_BODY,
+  LEFT_FINGER_GEOM,
+  PAP_CAMERA,
+  PAP_HOME,
+  PARK_Z,
+  RIGHT_FINGER_GEOM,
+  STAGE_JOINT,
+  ZONE_B_GEOM,
+  ZONE_HEIGHT,
+  containsPoint,
+  emptyLatches,
+  formatElapsed,
+  handFromWorld,
+  holdPoint,
+  nearestFingerCube,
+  placedCount,
+  stepLatches,
+  worldFromHand,
+  zoneFromBox,
+  type AppMode,
+  type Latch,
+  type Quat,
+  type Vec3,
+  type Zone,
+} from './pap';
 import './style.css';
 
 type NumericArray = { [index: number]: number; length: number; fill(value: number): void };
@@ -8,11 +40,23 @@ type MjDataAccess = {
   qpos: NumericArray;
   qvel: NumericArray;
   site_xpos: NumericArray;
+  xpos: NumericArray;
+  xquat: NumericArray;
+  geom_xpos: NumericArray;
+  xfrc_applied: NumericArray;
   time: number;
 };
 type MjModelAccess = {
   nsite: number;
   site(index: number): { name: string };
+  body(name: string): { id: number };
+  geom(name: string): { id: number; pos: NumericArray; size: NumericArray };
+  jnt(name: string): { id: number };
+  jnt_qposadr: NumericArray;
+  jnt_dofadr: NumericArray;
+  opt: { gravity: NumericArray; enableflags: number };
+  geom_contype: NumericArray;
+  body_mass: NumericArray;
 };
 type RuntimeAccess = {
   mjData: MjDataAccess | null;
@@ -81,6 +125,11 @@ app.innerHTML = `
     <section class="workspace">
       <div class="viewer-card">
         <div id="viewer" aria-label="MuJoCo 3D simulation"></div>
+        <div id="pap-banner" class="pap-banner hidden">
+          <strong id="pap-banner-title"></strong>
+          <p id="pap-banner-detail"></p>
+          <button id="pap-banner-restart" class="primary" type="button"></button>
+        </div>
         <div id="viewer-hint" class="viewer-hint"></div>
         <div id="load-error" class="load-error hidden"></div>
       </div>
@@ -94,15 +143,34 @@ app.innerHTML = `
             </div>
             <span id="trial-state" class="trial-state"></span>
           </div>
-          <div class="metric-grid">
-            <div><span id="metric-target-label"></span><strong id="target-index">1 / 3</strong></div>
-            <div><span id="metric-error-label"></span><strong id="distance">—</strong></div>
-            <div><span id="metric-dwell-label"></span><strong id="dwell">0.00 s</strong></div>
-            <div><span id="metric-switches-label"></span><strong id="switch-count">0</strong></div>
+          <div class="app-mode-toggle" id="app-mode-toggle" role="group">
+            <button type="button" id="app-mode-demo" data-app-mode="demo"></button>
+            <button type="button" id="app-mode-pap" data-app-mode="pap"></button>
           </div>
-          <div class="button-row">
-            <button id="start-trial" class="primary"></button>
-            <button id="download-csv" disabled></button>
+          <div id="demo-task">
+            <div class="metric-grid">
+              <div><span id="metric-target-label"></span><strong id="target-index">1 / 3</strong></div>
+              <div><span id="metric-error-label"></span><strong id="distance">—</strong></div>
+              <div><span id="metric-dwell-label"></span><strong id="dwell">0.00 s</strong></div>
+              <div><span id="metric-switches-label"></span><strong id="switch-count">0</strong></div>
+            </div>
+            <div class="button-row">
+              <button id="start-trial" class="primary"></button>
+              <button id="download-csv" disabled></button>
+            </div>
+          </div>
+          <div id="pap-task" class="hidden">
+            <p id="pap-legend" class="pap-legend"></p>
+            <div class="metric-grid">
+              <div><span id="pap-metric-placed-label"></span><strong id="pap-placed">0 / 5</strong></div>
+              <div><span id="pap-metric-remaining-label"></span><strong id="pap-remaining">5</strong></div>
+              <div><span id="pap-metric-time-label"></span><strong id="pap-time">0:00.0</strong></div>
+              <div><span id="pap-metric-hold-label"></span><strong id="pap-hold">—</strong></div>
+            </div>
+            <p id="pap-hint" class="pap-hint"></p>
+            <div class="button-row">
+              <button id="pap-start" class="primary" type="button"></button>
+            </div>
           </div>
         </section>
 
@@ -191,6 +259,26 @@ let modeSwitches = 0;
 let trialStartSimTime = 0;
 let logRows: string[][] = [];
 let endEffectorSiteId = -1;
+let appMode: AppMode = 'demo';
+let papTrialActive = false;
+let papLatched = false;
+let papElapsed = 0;
+let papLatches: Latch[] = emptyLatches();
+let heldIndex = -1;
+let heldLocal: Vec3 = [0, 0, 0];
+
+type FreeJoint = { qposAdr: number; qvelAdr: number };
+type PapBindings = {
+  stage: FreeJoint;
+  handBody: number;
+  leftFinger: number;
+  rightFinger: number;
+  zoneB: Zone;
+  cubes: (FreeJoint & { bodyId: number; geomId: number })[];
+};
+let papBind: PapBindings | null = null;
+
+const SLEEP_ENABLE_BIT = 16;
 
 function clamp(value: number, lower: number, upper: number): number {
   return Math.max(lower, Math.min(upper, value));
@@ -210,20 +298,174 @@ function applyTargets(): void {
   for (let index = 0; index < 4; index += 1) data.ctrl[index] = targets[index];
 }
 
-function resetSimulation(): void {
+function scalarAt(values: NumericArray, index: number): number {
+  return Number(values[index]);
+}
+
+function readVec3(values: NumericArray, offset: number): Vec3 {
+  return [values[offset], values[offset + 1], values[offset + 2]];
+}
+
+function readQuat(values: NumericArray, offset: number): Quat {
+  return [values[offset], values[offset + 1], values[offset + 2], values[offset + 3]];
+}
+
+function jointAddresses(name: string): FreeJoint {
+  if (!engine) throw new Error(`Joint ${name} requested before the engine was ready`);
+  const model = engine.runtime.mjModel;
+  const jointId = model.jnt(name).id;
+  return {
+    qposAdr: scalarAt(model.jnt_qposadr, jointId),
+    qvelAdr: scalarAt(model.jnt_dofadr, jointId),
+  };
+}
+
+function writeFreePose(joint: FreeJoint, position: readonly [number, number, number], upright = true): void {
+  if (!data) return;
+  data.qpos[joint.qposAdr] = position[0];
+  data.qpos[joint.qposAdr + 1] = position[1];
+  data.qpos[joint.qposAdr + 2] = position[2];
+  if (upright) {
+    data.qpos[joint.qposAdr + 3] = 1;
+    data.qpos[joint.qposAdr + 4] = 0;
+    data.qpos[joint.qposAdr + 5] = 0;
+    data.qpos[joint.qposAdr + 6] = 0;
+  }
+  for (let index = 0; index < 6; index += 1) data.qvel[joint.qvelAdr + index] = 0;
+}
+
+function setStageZ(z: number): void {
+  if (!papBind) return;
+  writeFreePose(papBind.stage, [0, 0, z]);
+}
+
+function parkPapObjects(): void {
+  if (!papBind) return;
+  setStageZ(PARK_Z);
+  papBind.cubes.forEach((cube, index) => {
+    const spawn = CUBE_SPAWN[index];
+    writeFreePose(cube, [spawn[0], spawn[1], PARK_Z]);
+  });
+}
+
+function spawnPapCubes(): void {
+  if (!papBind) return;
+  setStageZ(0);
+  papBind.cubes.forEach((cube, index) => writeFreePose(cube, CUBE_SPAWN[index]));
+}
+
+function applyCubeWeight(): void {
+  if (!data || !engine || !papBind) return;
+  const mass = engine.runtime.mjModel.body_mass;
+  for (const cube of papBind.cubes) {
+    const base = cube.bodyId * 6;
+    for (let axis = 0; axis < 6; axis += 1) data.xfrc_applied[base + axis] = 0;
+    const held = heldIndex >= 0 && papBind.cubes[heldIndex] === cube;
+    if (appMode === 'pap' && !held) data.xfrc_applied[base + 2] = -scalarAt(mass, cube.bodyId) * 9.81;
+  }
+}
+
+function lockStage(): void {
+  setStageZ(appMode === 'pap' ? 0 : PARK_Z);
+}
+
+function handPose(): { position: Vec3; quaternion: Quat } | null {
+  if (!data || !papBind) return null;
+  return {
+    position: readVec3(data.xpos, papBind.handBody * 3),
+    quaternion: readQuat(data.xquat, papBind.handBody * 4),
+  };
+}
+
+function fingerPosition(geomId: number): Vec3 {
+  if (!data) return [0, 0, 0];
+  return readVec3(data.geom_xpos, geomId * 3);
+}
+
+function cubePosition(bodyId: number): Vec3 {
+  if (!data) return [0, 0, 0];
+  return readVec3(data.xpos, bodyId * 3);
+}
+
+function snapHeldCube(): void {
+  if (!data || !papBind || heldIndex < 0) return;
+  const hand = handPose();
+  if (!hand) return;
+  const world = worldFromHand(hand.position, hand.quaternion, heldLocal);
+  writeFreePose(papBind.cubes[heldIndex], world);
+}
+
+function setCubeCollision(index: number, enabled: boolean): void {
+  if (!engine || !papBind) return;
+  engine.runtime.mjModel.geom_contype[papBind.cubes[index].geomId] = enabled ? 1 : 0;
+}
+
+function releaseGrasp(): void {
+  if (heldIndex >= 0) setCubeCollision(heldIndex, true);
+  heldIndex = -1;
+}
+
+function updateGrasp(): void {
+  if (!data || !papBind || appMode !== 'pap') {
+    releaseGrasp();
+    return;
+  }
+  if (heldIndex >= 0) {
+    if (targets[3] >= GRASP_RELEASE) releaseGrasp();
+    return;
+  }
+  // targets[3] moves as soon as J2 close is held, before the pads reach the cube.
+  if (targets[3] > GRASP_CLOSE) return;
+  const left = fingerPosition(papBind.leftFinger);
+  const right = fingerPosition(papBind.rightFinger);
+  const cubes = papBind.cubes.map((cube) => cubePosition(cube.bodyId));
+  const index = nearestFingerCube([left, right], cubes);
+  if (index < 0) return;
+  const hand = handPose();
+  if (!hand) return;
+  heldLocal = handFromWorld(hand.position, hand.quaternion, holdPoint(left, right, cubes[index]));
+  heldIndex = index;
+  setCubeCollision(index, false);
+}
+
+function syncPhysicsPose(): void {
   if (!engine || !data) return;
-  clearInput();
-  engine.reset();
-  targets = [...HOME];
-  for (let index = 0; index < data.qvel.length; index += 1) data.qvel[index] = 0;
-  data.qpos[0] = HOME[0];
-  data.qpos[1] = HOME[1];
-  data.qpos[2] = HOME[2];
-  data.qpos[3] = HOME[3];
-  data.qpos[4] = HOME[3];
-  applyTargets();
   engine.runtime.mujoco.mj_forward(engine.runtime.mjModel, data);
   engine.runtime.updateCachedState();
+}
+
+function writeArmHome(home: readonly [number, number, number, number]): void {
+  if (!data) return;
+  targets = [...home];
+  for (let index = 0; index < data.qvel.length; index += 1) data.qvel[index] = 0;
+  data.qpos[0] = home[0];
+  data.qpos[1] = home[1];
+  data.qpos[2] = home[2];
+  data.qpos[3] = home[3];
+  data.qpos[4] = home[3];
+}
+
+function resetSimulation(): void {
+  if (!engine || !data) return;
+  const sim = data;
+  clearInput();
+  const savedCubes = appMode === 'pap' && papBind
+    ? papBind.cubes.map((cube) => Array.from({ length: 7 }, (_, index) => sim.qpos[cube.qposAdr + index]))
+    : null;
+  releaseGrasp();
+  engine.reset();
+  writeArmHome(appMode === 'pap' ? PAP_HOME : HOME);
+  if (appMode === 'pap' && papBind && savedCubes) {
+    setStageZ(0);
+    papBind.cubes.forEach((cube, index) => {
+      const pose = savedCubes[index];
+      for (let offset = 0; offset < 7; offset += 1) sim.qpos[cube.qposAdr + offset] = pose[offset];
+    });
+  } else {
+    parkPapObjects();
+  }
+  applyTargets();
+  syncPhysicsPose();
   physicsAccumulator = 0;
 }
 
@@ -239,13 +481,41 @@ function renderControlLabels(): void {
   byId('label-d').textContent = j1 ? text.labelAdduction : text.labelHandClose;
 }
 
+function renderPapHud(): void {
+  const text = copy();
+  const placed = placedCount(papLatches);
+  const placedElement = byId('pap-placed');
+  placedElement.textContent = `${placed} / ${CUBE_COUNT}`;
+  placedElement.classList.toggle('success-text', placed === CUBE_COUNT);
+  byId('pap-remaining').textContent = String(CUBE_COUNT - placed);
+  byId('pap-time').textContent = formatElapsed(papElapsed);
+  byId('pap-hold').textContent = heldIndex >= 0 ? text.papHolding(heldIndex + 1) : text.papHoldNone;
+}
+
 function renderTrialChrome(): void {
   const text = copy();
+  if (appMode === 'pap') {
+    const phase = papLatched ? 'complete' : papTrialActive ? 'running' : 'idle';
+    trialState.textContent = phase === 'complete' ? text.papComplete : phase === 'running' ? text.papRunning : text.papIdle;
+    trialState.classList.toggle('complete', phase === 'complete');
+    const restartLabel = phase === 'idle' ? text.papStart : text.papRestart;
+    byId<HTMLButtonElement>('pap-start').textContent = restartLabel;
+    byId<HTMLButtonElement>('pap-banner-restart').textContent = text.papRestart;
+    const banner = byId('pap-banner');
+    banner.classList.toggle('hidden', phase !== 'complete');
+    if (phase === 'complete') {
+      byId('pap-banner-title').textContent = text.papBannerTitle;
+      byId('pap-banner-detail').textContent = text.papBannerDetail(formatElapsed(papElapsed));
+    }
+    renderPapHud();
+    return;
+  }
   const phase = trialComplete ? 'complete' : trialActive ? 'running' : 'idle';
   trialState.textContent = phase === 'complete' ? text.trialComplete : phase === 'running' ? text.trialRunning : text.trialIdle;
   trialState.classList.toggle('complete', phase === 'complete');
   startTrialButton.textContent = phase === 'idle' ? text.startTrial : text.restartTrial;
   if (trialComplete) targetIndexElement.textContent = text.targetDone;
+  byId('pap-banner').classList.add('hidden');
 }
 
 function failureText(failure: LoadFailure): string {
@@ -288,8 +558,21 @@ function applyCopy(): void {
   document.title = text.title;
   document.querySelector('meta[name="description"]')?.setAttribute('content', text.description);
   byId('page-title').textContent = text.title;
-  byId('viewer-hint').textContent = text.viewerHint;
-  byId('task-title').textContent = text.taskTitle;
+  byId('viewer-hint').textContent = appMode === 'pap' ? text.viewerHintPap : text.viewerHint;
+  byId('task-title').textContent = appMode === 'pap' ? text.papTitle : text.taskTitle;
+  byId('app-mode-demo').textContent = text.modeDemo;
+  byId('app-mode-pap').textContent = text.modePap;
+  byId('app-mode-toggle').setAttribute('aria-label', text.appModeAria);
+  byId('app-mode-demo').setAttribute('aria-pressed', appMode === 'demo' ? 'true' : 'false');
+  byId('app-mode-pap').setAttribute('aria-pressed', appMode === 'pap' ? 'true' : 'false');
+  byId('demo-task').classList.toggle('hidden', appMode !== 'demo');
+  byId('pap-task').classList.toggle('hidden', appMode !== 'pap');
+  byId('pap-legend').textContent = text.papLegend;
+  byId('pap-metric-placed-label').textContent = text.papMetricPlaced;
+  byId('pap-metric-remaining-label').textContent = text.papMetricRemaining;
+  byId('pap-metric-time-label').textContent = text.papMetricTime;
+  byId('pap-metric-hold-label').textContent = text.papMetricHold;
+  byId('pap-hint').textContent = text.papHint;
   byId('metric-target-label').textContent = text.metricTarget;
   byId('metric-error-label').textContent = text.metricError;
   byId('metric-dwell-label').textContent = text.metricDwell;
@@ -365,8 +648,25 @@ function updateTelemetry(): void {
   switchCountElement.textContent = String(modeSwitches);
 }
 
+function updatePap(dt: number): void {
+  if (!data || !papBind || appMode !== 'pap') return;
+  if (!papLatched) {
+    const inside = papBind.cubes.map((cube) => {
+      const position = cubePosition(cube.bodyId);
+      return containsPoint(papBind!.zoneB, position[0], position[1], position[2]);
+    });
+    stepLatches(papLatches, inside, dt);
+    if (papTrialActive && placedCount(papLatches) >= CUBE_COUNT) {
+      papLatched = true;
+      papTrialActive = false;
+      renderTrialChrome();
+    }
+  }
+  if (papTrialActive) papElapsed += dt;
+}
+
 function updateTask(dt: number): void {
-  if (!trialActive || trialComplete) return;
+  if (appMode !== 'demo' || !trialActive || trialComplete) return;
   if (currentDistance() <= TARGET_RADIUS) {
     dwell += dt;
     if (dwell >= DWELL_SECONDS) {
@@ -396,7 +696,7 @@ const CSV_HEADER = [
 ];
 
 function logSample(): void {
-  if (!data || !trialActive) return;
+  if (!data || appMode !== 'demo' || !trialActive) return;
   if (data.time - lastLogTime < 0.0195) return;
   lastLogTime = data.time;
   const ee = endEffectorPosition();
@@ -423,8 +723,82 @@ function logSample(): void {
   downloadButton.disabled = false;
 }
 
+function resetPapTrial(): void {
+  if (!data || !papBind) return;
+  releaseGrasp();
+  papLatches = emptyLatches();
+  papElapsed = 0;
+  papLatched = false;
+  papTrialActive = true;
+  clearInput();
+  setMode(0, false);
+  writeArmHome(PAP_HOME);
+  spawnPapCubes();
+  applyTargets();
+  syncPhysicsPose();
+  physicsAccumulator = 0;
+  renderTrialChrome();
+}
+
+function setAppMode(next: AppMode): void {
+  if (!engine || !data || !papBind || next === appMode) return;
+  appMode = next;
+  releaseGrasp();
+  clearInput();
+  if (next === 'pap') {
+    trialActive = false;
+    applyCubeWeight();
+    setMode(0, false);
+    writeArmHome(PAP_HOME);
+    spawnPapCubes();
+    papLatches = emptyLatches();
+    papElapsed = 0;
+    papLatched = false;
+    papTrialActive = false;
+    engine.camera.set(PAP_CAMERA);
+  } else {
+    papTrialActive = false;
+    papLatched = false;
+    applyCubeWeight();
+    writeArmHome(HOME);
+    parkPapObjects();
+    engine.camera.set(DEMO_CAMERA);
+  }
+  applyTargets();
+  syncPhysicsPose();
+  physicsAccumulator = 0;
+  applyCopy();
+  updateTelemetry();
+}
+
+function bindPap(): void {
+  if (!engine) return;
+  const model = engine.runtime.mjModel;
+  // Island sleep would ignore a light cube until a hard impact. Keep every cube awake.
+  model.opt.enableflags &= ~SLEEP_ENABLE_BIT;
+  const zoneGeom = model.geom(ZONE_B_GEOM);
+  const cubes = CUBE_NAMES.map((name) => {
+    const joint = jointAddresses(`${name}_free`);
+    return { ...joint, bodyId: model.body(name).id, geomId: model.geom(`${name}_geom`).id };
+  });
+  papBind = {
+    stage: jointAddresses(STAGE_JOINT),
+    handBody: model.body(HAND_BODY).id,
+    leftFinger: model.geom(LEFT_FINGER_GEOM).id,
+    rightFinger: model.geom(RIGHT_FINGER_GEOM).id,
+    zoneB: zoneFromBox(
+      [zoneGeom.pos[0], zoneGeom.pos[1], zoneGeom.pos[2]],
+      [zoneGeom.size[0], zoneGeom.size[1], zoneGeom.size[2]],
+      ZONE_HEIGHT,
+    ),
+    cubes,
+  };
+  applyCubeWeight();
+  parkPapObjects();
+}
+
 function startTrial(): void {
-  if (!data) return;
+  if (!data || appMode !== 'demo') return;
   resetSimulation();
   setMode(0, false);
   targetIndex = 0;
@@ -472,15 +846,28 @@ function update(now: number): void {
     // position targets remain active. Rendering continues independently in Mjswan.
     physicsAccumulator += dt;
     while (physicsAccumulator >= PHYSICS_DT) {
+      lockStage();
+      snapHeldCube();
+      applyCubeWeight();
       applyTargets();
       engine.runtime.mujoco.mj_step(engine.runtime.mjModel, data);
       physicsAccumulator -= PHYSICS_DT;
     }
-    engine.runtime.updateCachedState();
-    updateTask(dt);
-    logSample();
+    snapHeldCube();
+    syncPhysicsPose();
+    updateGrasp();
+    if (heldIndex >= 0) {
+      snapHeldCube();
+      syncPhysicsPose();
+    }
+    if (appMode === 'pap') updatePap(dt);
+    else {
+      updateTask(dt);
+      logSample();
+    }
     if (now - lastUiUpdate > 50) {
       updateTelemetry();
+      if (appMode === 'pap') renderPapHud();
       lastUiUpdate = now;
     }
   }
@@ -524,8 +911,18 @@ document.querySelectorAll<HTMLButtonElement>('.joy').forEach((button) => {
 
 byId('toggle-mode').addEventListener('click', toggleMode);
 byId('reset').addEventListener('click', resetSimulation);
-byId('frame-camera').addEventListener('click', () => engine?.camera.frame());
+byId('frame-camera').addEventListener('click', () => {
+  engine?.camera.set(appMode === 'pap' ? PAP_CAMERA : DEMO_CAMERA);
+});
 startTrialButton.addEventListener('click', startTrial);
+byId('pap-start').addEventListener('click', resetPapTrial);
+byId('pap-banner-restart').addEventListener('click', resetPapTrial);
+document.querySelectorAll<HTMLButtonElement>('[data-app-mode]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const next = button.dataset.appMode;
+    if (next === 'demo' || next === 'pap') setAppMode(next);
+  });
+});
 downloadButton.addEventListener('click', downloadCsv);
 document.querySelectorAll<HTMLButtonElement>('[data-locale]').forEach((button) => {
   button.addEventListener('click', () => {
@@ -564,11 +961,13 @@ async function boot(): Promise<void> {
       }
     }
     if (endEffectorSiteId < 0) throw new LoadError({ code: 'no-site' });
+    bindPap();
     resetSimulation();
     // Deliberately keep Mjswan's policy loop paused; update() owns physics stepping.
     enginePhase = 'ready';
     renderStatus();
     startTrialButton.disabled = false;
+    byId<HTMLButtonElement>('pap-start').disabled = false;
     updateTelemetry();
   } catch (error) {
     enginePhase = 'error';
@@ -582,5 +981,6 @@ async function boot(): Promise<void> {
 
 applyCopy();
 startTrialButton.disabled = true;
+byId<HTMLButtonElement>('pap-start').disabled = true;
 requestAnimationFrame(update);
 void boot();
