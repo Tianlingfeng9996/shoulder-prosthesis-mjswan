@@ -59,6 +59,13 @@ def main() -> None:
     left = float(data.qpos[model.jnt_qposadr[left_id]])
     assert abs(right - left) < 5e-4, (left, right)
 
+    for index in range(1, 6):
+        body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, f"pap_cube_{index}")
+        assert body_id >= 0, f"missing pap_cube_{index}"
+        assert float(data.xpos[body_id][2]) < -1.0, data.xpos[body_id]
+    for name in ("pap_zone_a", "pap_zone_b", "pap_platform"):
+        assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name) >= 0, name
+
     print("MJCF compile/step test: PASS")
     print(f"MuJoCo version: {mujoco.__version__}")
     print(f"nq={model.nq}, nv={model.nv}, nu={model.nu}, neq={model.neq}")
